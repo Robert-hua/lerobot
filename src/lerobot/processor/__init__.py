@@ -75,6 +75,12 @@ from .policy_robot_bridge import (
     RobotActionToPolicyActionProcessorStep,
 )
 from .rename_processor import RenameObservationsProcessorStep
+from .slice_processor import (
+    ActionSliceProcessorStep,
+    ImageSelectProcessorStep,
+    StateActionSliceProcessorStep,
+    StateSliceProcessorStep,
+)
 from .tokenizer_processor import TokenizerProcessorStep
 
 __all__ = [
@@ -130,4 +136,8 @@ __all__ = [
     "TruncatedProcessorStep",
     "UnnormalizerProcessorStep",
     "VanillaObservationProcessorStep",
+    "ActionSliceProcessorStep",
+    "ImageSelectProcessorStep",
+    "StateActionSliceProcessorStep",
+    "StateSliceProcessorStep",
 ]

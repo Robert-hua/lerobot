@@ -1,0 +1,64 @@
+{
+    "batch_size": 24,
+    "steps": 100000,
+    "num_workers": 4,
+    "seed": 1000,
+    "save_freq": 2000,
+    "eval_freq": 2000,
+    "log_freq": 100,
+    "output_dir": "outputs/train/pick_bottle_act_max_speed",
+    "wandb": {
+        "enable": true,
+        "project": "lerobot-pick-bottle"
+    },
+    "dataset": {
+        "repo_id": "lerobot/pick_bottle2",
+        "root": "/mnt/data2/baohua/dataHub/lerobot/pick_bottle2",
+        "image_transforms": {
+            "enable": true,
+            "max_num_transforms": 3,
+            "random_order": false,
+            "tfs": {
+                "brightness": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {"brightness": [0.8, 1.2]}
+                },
+                "contrast": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {"contrast": [0.8, 1.2]}
+                },
+                "saturation": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {"saturation": [0.5, 1.5]}
+                },
+                "hue": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {"hue": [-0.05, 0.05]}
+                },
+                "sharpness": {
+                    "weight": 1.0,
+                    "type": "SharpnessJitter",
+                    "kwargs": {"sharpness": [0.5, 1.5]}
+                }
+            }
+        }
+    },
+    "policy": {
+        "type": "act",
+        "push_to_hub": false,
+        "chunk_size": 50,
+        "n_action_steps": 50
+    },
+    "state_indices": [0, 1, 2, 3, 4, 5, 6, 14],
+    "action_indices": [0, 1, 2, 3, 4, 5, 6, 14],
+    "image_keys": [
+        "observation.images.head",
+        "observation.images.hand_left",
+        "observation.images.hand_right"
+    ],
+    "resize_size": [480, 640]
+}

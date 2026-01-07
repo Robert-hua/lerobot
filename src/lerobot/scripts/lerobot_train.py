@@ -224,21 +224,75 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
 
     if is_main_process:
         logging.info("Creating policy")
+    
+    # Filter dataset metadata to only include specified features
+    import copy
+    ds_meta_for_policy = copy.deepcopy(dataset.meta)
+    
+    # Filter image features
+    if cfg.image_keys:
+        all_image_keys = [k for k in ds_meta_for_policy.features.keys() if k.startswith("observation.images.")]
+        for img_key in all_image_keys:
+            if img_key not in cfg.image_keys:
+                del ds_meta_for_policy.features[img_key]
+                if img_key in ds_meta_for_policy.camera_keys:
+                    ds_meta_for_policy.camera_keys.remove(img_key)
+        if is_main_process:
+            logging.info(f"Filtered image features to: {cfg.image_keys}")
+    
+    # Slice observation.state shape
+    if cfg.state_indices and "observation.state" in ds_meta_for_policy.features:
+        original_shape = ds_meta_for_policy.features["observation.state"]["shape"]
+        ds_meta_for_policy.features["observation.state"]["shape"] = [len(cfg.state_indices)]
+        if is_main_process:
+            logging.info(f"Sliced observation.state shape from {original_shape} to {ds_meta_for_policy.features['observation.state']['shape']}")
+    
+    # Slice action shape
+    if cfg.action_indices and "action" in ds_meta_for_policy.features:
+        original_shape = ds_meta_for_policy.features["action"]["shape"]
+        ds_meta_for_policy.features["action"]["shape"] = [len(cfg.action_indices)]
+        if is_main_process:
+            logging.info(f"Sliced action shape from {original_shape} to {ds_meta_for_policy.features['action']['shape']}")
+    
     policy = make_policy(
         cfg=cfg.policy,
-        ds_meta=dataset.meta,
+        ds_meta=ds_meta_for_policy,
         rename_map=cfg.rename_map,
     )
 
     # Wait for all processes to finish policy creation before continuing
     accelerator.wait_for_everyone()
 
+    # Slice stats if state_indices or action_indices are configured
+    sliced_stats = dataset.meta.stats
+    if cfg.state_indices or cfg.action_indices:
+        import copy
+        sliced_stats = copy.deepcopy(dataset.meta.stats)
+        
+        # Slice observation.state stats
+        if cfg.state_indices and "observation.state" in sliced_stats:
+            for stat_key in ['min', 'max', 'mean', 'std', 'q01', 'q10', 'q50', 'q90', 'q99']:
+                if stat_key in sliced_stats['observation.state']:
+                    original_values = sliced_stats['observation.state'][stat_key]
+                    sliced_stats['observation.state'][stat_key] = [original_values[i] for i in cfg.state_indices]
+            if is_main_process:
+                logging.info(f"Sliced observation.state stats from {len(dataset.meta.stats['observation.state']['mean'])} to {len(sliced_stats['observation.state']['mean'])} dims")
+        
+        # Slice action stats
+        if cfg.action_indices and "action" in sliced_stats:
+            for stat_key in ['min', 'max', 'mean', 'std', 'q01', 'q10', 'q50', 'q90', 'q99']:
+                if stat_key in sliced_stats['action']:
+                    original_values = sliced_stats['action'][stat_key]
+                    sliced_stats['action'][stat_key] = [original_values[i] for i in cfg.action_indices]
+            if is_main_process:
+                logging.info(f"Sliced action stats from {len(dataset.meta.stats['action']['mean'])} to {len(sliced_stats['action']['mean'])} dims")
+
     # Create processors - only provide dataset_stats if not resuming from saved processors
     processor_kwargs = {}
     postprocessor_kwargs = {}
     if (cfg.policy.pretrained_path and not cfg.resume) or not cfg.policy.pretrained_path:
         # Only provide dataset_stats when not resuming from saved processor state
-        processor_kwargs["dataset_stats"] = dataset.meta.stats
+        processor_kwargs["dataset_stats"] = sliced_stats
 
     # For SARM, always provide dataset_meta for progress normalization
     if cfg.policy.type == "sarm":
@@ -248,7 +302,7 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         processor_kwargs["preprocessor_overrides"] = {
             "device_processor": {"device": device.type},
             "normalizer_processor": {
-                "stats": dataset.meta.stats,
+                "stats": sliced_stats,
                 "features": {**policy.config.input_features, **policy.config.output_features},
                 "norm_map": policy.config.normalization_mapping,
             },
@@ -258,11 +312,21 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         }
         postprocessor_kwargs["postprocessor_overrides"] = {
             "unnormalizer_processor": {
-                "stats": dataset.meta.stats,
+                "stats": sliced_stats,
                 "features": policy.config.output_features,
                 "norm_map": policy.config.normalization_mapping,
             },
         }
+
+    # Add slice parameters if configured
+    if cfg.state_indices:
+        processor_kwargs["state_indices"] = cfg.state_indices
+    if cfg.action_indices:
+        processor_kwargs["action_indices"] = cfg.action_indices
+    if cfg.image_keys:
+        processor_kwargs["image_keys"] = cfg.image_keys
+    if cfg.resize_size:
+        processor_kwargs["resize_size"] = cfg.resize_size
 
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=cfg.policy,

@@ -75,6 +75,13 @@ class TrainPipelineConfig(HubMixin):
 
     # Rename map for the observation to override the image and state keys
     rename_map: dict[str, str] = field(default_factory=dict)
+
+    # Feature slicing configuration for training with subset of dimensions
+    state_indices: list[int] | None = None  # Indices of state dimensions to use (e.g., [0,1,2,3,4,5,6])
+    action_indices: list[int] | None = None  # Indices of action dimensions to use
+    image_keys: list[str] | None = None  # Image keys to use (e.g., ["observation.images.head"])
+    resize_size: tuple[int, int] | None = None  # (height, width) to resize images to (e.g., [480, 640])
+
     checkpoint_path: Path | None = field(init=False, default=None)
 
     def validate(self) -> None:

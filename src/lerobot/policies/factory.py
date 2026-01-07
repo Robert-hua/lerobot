@@ -194,6 +194,9 @@ class ProcessorConfigKwargs(TypedDict, total=False):
         preprocessor_overrides: A dictionary of overrides for the preprocessor configuration.
         postprocessor_overrides: A dictionary of overrides for the postprocessor configuration.
         dataset_stats: Dataset statistics for normalization.
+        state_indices: List of state dimension indices to keep for slicing.
+        action_indices: List of action dimension indices to keep for slicing.
+        image_keys: List of image keys to keep for slicing.
     """
 
     preprocessor_config_filename: str | None
@@ -201,6 +204,10 @@ class ProcessorConfigKwargs(TypedDict, total=False):
     preprocessor_overrides: dict[str, Any] | None
     postprocessor_overrides: dict[str, Any] | None
     dataset_stats: dict[str, dict[str, torch.Tensor]] | None
+    state_indices: list[int] | None
+    action_indices: list[int] | None
+    image_keys: list[str] | None
+    resize_size: tuple[int, int] | None
 
 
 def make_pre_post_processors(
@@ -299,6 +306,10 @@ def make_pre_post_processors(
         processors = make_act_pre_post_processors(
             config=policy_cfg,
             dataset_stats=kwargs.get("dataset_stats"),
+            state_indices=kwargs.get("state_indices"),
+            action_indices=kwargs.get("action_indices"),
+            image_keys=kwargs.get("image_keys"),
+            resize_size=kwargs.get("resize_size"),
         )
 
     elif isinstance(policy_cfg, VQBeTConfig):
