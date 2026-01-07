@@ -147,6 +147,8 @@ def evaluate_single_episode(
     action_horizon: int = 16,
     save_plot_path: str | None = None,
     device: str = "cuda",
+    action_indices: list[int] | None = None,
+    state_indices: list[int] | None = None,
 ) -> tuple[float, float]:
     """
     Evaluate a single episode by comparing predicted actions to ground truth.
@@ -197,6 +199,9 @@ def evaluate_single_episode(
             # Handle multi-step action format
             if gt_action.ndim > 1:
                 gt_action = gt_action[0]  # Take first step if action has temporal dimension
+            # Apply action_indices slicing to match predicted actions
+            if action_indices is not None:
+                gt_action = gt_action[action_indices]
             gt_action_across_time.append(gt_action)
 
             # Collect state if available
@@ -206,6 +211,9 @@ def evaluate_single_episode(
                     state = state.cpu().numpy()
                 if state.ndim > 1:
                     state = state[-1]  # Take last observation if has temporal dimension
+                # Apply state_indices slicing to match the model input
+                if state_indices is not None:
+                    state = state[state_indices]
                 state_across_time.append(state)
 
         # Prepare observation for policy
@@ -223,9 +231,14 @@ def evaluate_single_episode(
         # Apply preprocessor
         obs = preprocessor(obs)
 
-        # Get action from policy
+        # Get action chunk from policy
+        # Note: We use predict_action_chunk instead of select_action to get the full action sequence
+        # select_action only returns one action at a time from the queue
         with torch.inference_mode():
-            action = policy.select_action(obs)
+            if hasattr(policy, 'predict_action_chunk'):
+                action = policy.predict_action_chunk(obs)
+            else:
+                action = policy.select_action(obs)
 
         # Apply postprocessor
         action = postprocessor(action)
@@ -264,19 +277,18 @@ def evaluate_single_episode(
     else:
         state_across_time = None
 
-    # Ensure shapes match
+    # Ensure temporal length matches
     min_len = min(len(gt_action_across_time), len(pred_action_across_time))
     gt_action_across_time = gt_action_across_time[:min_len]
     pred_action_across_time = pred_action_across_time[:min_len]
 
+    # Verify shapes match (they should since we applied action_indices slicing to gt)
     if gt_action_across_time.shape != pred_action_across_time.shape:
-        logging.warning(
-            f"Shape mismatch: gt={gt_action_across_time.shape}, pred={pred_action_across_time.shape}"
+        raise ValueError(
+            f"Shape mismatch after slicing: gt={gt_action_across_time.shape}, "
+            f"pred={pred_action_across_time.shape}. This should not happen if action_indices "
+            f"was correctly applied to ground truth actions."
         )
-        # Try to align dimensions
-        min_dim = min(gt_action_across_time.shape[-1], pred_action_across_time.shape[-1])
-        gt_action_across_time = gt_action_across_time[..., :min_dim]
-        pred_action_across_time = pred_action_across_time[..., :min_dim]
 
     # Calculate metrics
     mse = np.mean((gt_action_across_time - pred_action_across_time) ** 2)
@@ -305,10 +317,10 @@ class OpenLoopEvalConfig:
     episode_ids: list[int] = field(default_factory=lambda: [0])
     """List of episode IDs to evaluate."""
 
-    steps: int = 300
+    steps: int = 500
     """Maximum number of steps to evaluate per episode."""
 
-    action_horizon: int = 16
+    action_horizon: int = 30
     """Number of steps between policy inferences."""
 
     save_plot_dir: str = "outputs/openloop_eval_plots"
@@ -412,15 +424,19 @@ def openloop_eval_main(cfg: OpenLoopEvalPipelineConfig):
     # Calculate delta_timestamps from policy config
     delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
 
-    # Load dataset
+    # Load dataset WITHOUT any image transforms
+    # Note: Image resize and normalization are handled by the preprocessor
+    # This matches the training setup where ImageTransforms only does augmentation (disabled in eval)
     dataset = LeRobotDataset(
         cfg.dataset.repo_id,
         root=cfg.dataset.root,
         delta_timestamps=delta_timestamps,
+        image_transforms=None,  # No transforms - preprocessor will handle resize
         revision=cfg.dataset.revision,
         video_backend=cfg.dataset.video_backend,
     )
     logging.info(f"Dataset loaded: {len(dataset)} samples, {dataset.num_episodes} episodes")
+    logging.info("Image resize will be handled by preprocessor (not dataset)")
 
     # Create policy
     logging.info("Loading policy...")
@@ -431,6 +447,12 @@ def openloop_eval_main(cfg: OpenLoopEvalPipelineConfig):
     policy.eval()
 
     # Create preprocessor and postprocessor
+    # Preprocessor handles:
+    #   - Image normalization (e.g., to [-1, 1] or using ImageNet stats)
+    #   - State normalization
+    #   - Device transfer
+    # Postprocessor handles:
+    #   - Action denormalization (converting from normalized space back to original scale)
     preprocessor_overrides = {
         "device_processor": {"device": str(cfg.policy.device)},
     }
@@ -443,6 +465,7 @@ def openloop_eval_main(cfg: OpenLoopEvalPipelineConfig):
         image_keys=cfg.image_keys,
         resize_size=cfg.resize_size,
     )
+    logging.info("Preprocessor and postprocessor created (handles normalization/denormalization)")
 
     # Run evaluation
     all_mse = []
@@ -470,6 +493,8 @@ def openloop_eval_main(cfg: OpenLoopEvalPipelineConfig):
                 action_horizon=cfg.eval.action_horizon,
                 save_plot_path=save_plot_path,
                 device=str(cfg.policy.device),
+                action_indices=cfg.action_indices,
+                state_indices=cfg.state_indices,
             )
 
             all_mse.append(mse)
