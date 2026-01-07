@@ -7,20 +7,10 @@
 set -e  # Exit on error
 
 # Configuration
-# Auto-detect data root or use specified path
-if [ -d "/mnt/data/data_hub" ]; then
-    DATA_ROOT="/mnt/data/data_hub"
-elif [ -d "/workspace/data_hub" ]; then
-    DATA_ROOT="/workspace/data_hub"
-else
-    echo "ERROR: Cannot find data_hub directory!"
-    echo "Please set DATA_ROOT manually in the script."
-    exit 1
-fi
-
+DATA_ROOT="/workspace/data_hub"
 OUTPUT_REPO_ID="pick_bottle_all"
 
-# Dataset repo IDs to merge (these should match the actual dataset names in DATA_ROOT)
+# Dataset paths to merge
 DATASETS=(
     "pick_bottle_1"
     "pick_bottle_long"
@@ -41,30 +31,13 @@ echo "=========================================="
 # Check if datasets exist
 echo ""
 echo "Checking if datasets exist..."
-MISSING_DATASETS=()
 for dataset in "${DATASETS[@]}"; do
     if [ ! -d "${DATA_ROOT}/${dataset}" ]; then
-        echo "  ✗ ${dataset} NOT FOUND at ${DATA_ROOT}/${dataset}"
-        MISSING_DATASETS+=("${dataset}")
-    else
-        echo "  ✓ ${dataset} found"
+        echo "ERROR: Dataset ${DATA_ROOT}/${dataset} does not exist!"
+        exit 1
     fi
+    echo "  ✓ ${dataset} found"
 done
-
-if [ ${#MISSING_DATASETS[@]} -gt 0 ]; then
-    echo ""
-    echo "ERROR: ${#MISSING_DATASETS[@]} dataset(s) not found!"
-    echo "Missing datasets: ${MISSING_DATASETS[*]}"
-    echo ""
-    echo "Available datasets in ${DATA_ROOT}:"
-    ls -1 "${DATA_ROOT}/" 2>/dev/null || echo "  (directory not accessible)"
-    echo ""
-    echo "Please check:"
-    echo "  1. Dataset names are correct"
-    echo "  2. Datasets exist in ${DATA_ROOT}"
-    echo "  3. You have read permissions"
-    exit 1
-fi
 
 # Run the merge operation
 echo ""
@@ -96,3 +69,4 @@ else
     echo "=========================================="
     exit 1
 fi
+
